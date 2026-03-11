@@ -1,0 +1,290 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+
+const CRITTERS = [
+  { id: "foxling", name: "Foxling", emoji: "🦊", rarity: "common", color: "#FF6B35", points: 10 },
+  { id: "moonbun", name: "Moonbun", emoji: "🐰", rarity: "common", color: "#A8D8EA", points: 10 },
+  { id: "glowfrog", name: "Glowfrog", emoji: "🐸", rarity: "common", color: "#95E1A3", points: 15 },
+  { id: "stardust", name: "Stardust", emoji: "✨", rarity: "rare", color: "#FFD700", points: 50 },
+  { id: "crystalwolf", name: "Crystalwolf", emoji: "🐺", rarity: "rare", color: "#B8A9FF", points: 60 },
+  { id: "shadowcat", name: "Shadowcat", emoji: "🐈‍⬛", rarity: "rare", color: "#6C63FF", points: 70 },
+  { id: "phoenixbird", name: "Phoenix", emoji: "🔥", rarity: "legendary", color: "#FF4444", points: 200 },
+  { id: "moondragon", name: "Moondragon", emoji: "🐉", rarity: "legendary", color: "#7B2FBE", points: 300 },
+  { id: "cosmicjelly", name: "Cosmicjelly", emoji: "🪼", rarity: "epic", color: "#00D4FF", points: 120 },
+];
+
+const RARITY_WEIGHTS = { common: 60, rare: 25, epic: 10, legendary: 5 };
+const RARITY_COLORS = {
+  common: "#95E1A3",
+  rare: "#6C63FF",
+  epic: "#00D4FF",
+  legendary: "#FFD700",
+};
+
+function getRandomCritter() {
+  const roll = Math.random() * 100;
+  let cumulative = 0;
+  let tier = "common";
+  for (const [r, w] of Object.entries(RARITY_WEIGHTS)) {
+    cumulative += w;
+    if (roll < cumulative) { tier = r; break; }
+  }
+  const pool = CRITTERS.filter(c => c.rarity === tier);
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+const FAKE_VIEWERS = ["StreamerPal42", "NightOwl_TV", "xX_Gamer_Xx", "CuriousCat99", "PixelQueen", "LootGoblin", "Vexx_Dev", "StarChaser"];
+
+export default function StreamCritter() {
+  const [activeCritter, setActiveCritter] = useState(null);
+  const [catchWindow, setCatchWindow] = useState(false);
+  const [chatLog, setChatLog] = useState([]);
+  const [collection, setCollection] = useState({});
+  const [leaderboard, setLeaderboard] = useState({});
+  const [catchEffect, setCatchEffect] = useState(null);
+  const [spawnTimer, setSpawnTimer] = useState(null);
+  const [tab, setTab] = useState("live");
+  const [yourName] = useState("YOU");
+  const timerRef = useRef(null);
+  const countdownRef = useRef(null);
+  const [countdown, setCountdown] = useState(0);
+  const chatRef = useRef(null);
+
+  const addChat = useCallback((user, msg, type = "normal") => {
+    setChatLog(prev => [...prev.slice(-30), { user, msg, type, id: Date.now() + Math.random() }]);
+  }, []);
+
+  const spawnCritter = useCallback(() => {
+    const critter = getRandomCritter();
+    setActiveCritter(critter);
+    setCatchWindow(true);
+    setCountdown(15);
+    addChat("🎮 System", `A wild ${critter.emoji} ${critter.name} appeared! [${critter.rarity.toUpperCase()}] Type !catch to grab it!`, "system");
+
+    countdownRef.current = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(countdownRef.current);
+          setCatchWindow(false);
+          setActiveCritter(null);
+          addChat("🎮 System", `The ${critter.name} ran away... 😢`, "system");
+          scheduleNext();
+          return 0;
+        }
+        // Fake viewer catches
+        if (prev === 10 && Math.random() > 0.4) {
+          const faker = FAKE_VIEWERS[Math.floor(Math.random() * FAKE_VIEWERS.length)];
+          addChat(faker, "!catch", "catch");
+          setLeaderboard(lb => {
+            const pts = (lb[faker] || 0) + critter.points;
+            return { ...lb, [faker]: pts };
+          });
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, [addChat]);
+
+  const scheduleNext = useCallback(() => {
+    const delay = 8000 + Math.random() * 12000;
+    setSpawnTimer(Math.round(delay / 1000));
+    timerRef.current = setTimeout(spawnCritter, delay);
+    const st = setInterval(() => {
+      setSpawnTimer(p => {
+        if (p <= 1) { clearInterval(st); return 0; }
+        return p - 1;
+      });
+    }, 1000);
+  }, [spawnCritter]);
+
+  useEffect(() => {
+    addChat("🎮 System", "Stream Critter is LIVE! Watch for wild critters to appear!", "system");
+    const t = setTimeout(() => spawnCritter(), 3000);
+    return () => { clearTimeout(t); clearInterval(timerRef.current); clearInterval(countdownRef.current); };
+  }, []);
+
+  useEffect(() => {
+    if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
+  }, [chatLog]);
+
+  const handleCatch = () => {
+    if (!catchWindow || !activeCritter) return;
+    clearInterval(countdownRef.current);
+    setCatchWindow(false);
+    const critter = activeCritter;
+    setActiveCritter(null);
+
+    setCollection(prev => ({
+      ...prev,
+      [critter.id]: (prev[critter.id] || 0) + 1,
+    }));
+    setLeaderboard(lb => ({ ...lb, [yourName]: (lb[yourName] || 0) + critter.points }));
+
+    setCatchEffect(critter);
+    addChat(yourName, `!catch`, "catch");
+    addChat("🎮 System", `✅ ${yourName} caught the ${critter.emoji} ${critter.name}! +${critter.points} pts`, "success");
+    setTimeout(() => setCatchEffect(null), 2000);
+    scheduleNext();
+  };
+
+  const myCollection = CRITTERS.filter(c => collection[c.id]);
+  const sortedLB = Object.entries(leaderboard).sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+  return (
+    <div style={{
+      minHeight: "100vh",
+      background: "linear-gradient(135deg, #0a0a1a 0%, #0d1b2a 50%, #0a0a1a 100%)",
+      fontFamily: "'Segoe UI', system-ui, sans-serif",
+      color: "#e0e0ff",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      padding: "20px",
+      gap: "16px",
+    }}>
+      {/* Header */}
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: "28px", fontWeight: 900, letterSpacing: "2px", background: "linear-gradient(90deg, #7B2FBE, #00D4FF, #FFD700)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+          ✦ STREAM CRITTER ✦
+        </div>
+        <div style={{ fontSize: "11px", color: "#888", letterSpacing: "3px", marginTop: "2px" }}>TWITCH COLLECTOR GAME</div>
+      </div>
+
+      {/* Spawn Zone */}
+      <div style={{
+        width: "100%", maxWidth: "420px",
+        background: "rgba(255,255,255,0.04)",
+        border: `2px solid ${activeCritter ? RARITY_COLORS[activeCritter.rarity] : "rgba(255,255,255,0.1)"}`,
+        borderRadius: "16px",
+        padding: "20px",
+        textAlign: "center",
+        position: "relative",
+        transition: "border-color 0.3s",
+        boxShadow: activeCritter ? `0 0 30px ${RARITY_COLORS[activeCritter.rarity]}44` : "none",
+        minHeight: "160px",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "10px"
+      }}>
+        {catchEffect && (
+          <div style={{
+            position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
+            background: `${RARITY_COLORS[catchEffect.rarity]}22`, borderRadius: "14px",
+            animation: "pulse 0.5s ease-out",
+            zIndex: 10, fontSize: "60px", pointerEvents: "none"
+          }}>
+            🎉
+          </div>
+        )}
+
+        {activeCritter ? (
+          <>
+            <div style={{ fontSize: "11px", color: RARITY_COLORS[activeCritter.rarity], letterSpacing: "3px", fontWeight: 700 }}>
+              {activeCritter.rarity.toUpperCase()} CRITTER APPEARED!
+            </div>
+            <div style={{ fontSize: "64px", lineHeight: 1, filter: `drop-shadow(0 0 20px ${activeCritter.color})`, animation: "bob 1s ease-in-out infinite" }}>
+              {activeCritter.emoji}
+            </div>
+            <div style={{ fontSize: "20px", fontWeight: 800, color: activeCritter.color }}>{activeCritter.name}</div>
+            <div style={{ fontSize: "12px", color: "#aaa" }}>+{activeCritter.points} Punkte • {countdown}s verbleibend</div>
+            <div style={{ width: "200px", height: "6px", background: "rgba(255,255,255,0.1)", borderRadius: "3px", overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${(countdown / 15) * 100}%`, background: RARITY_COLORS[activeCritter.rarity], borderRadius: "3px", transition: "width 1s linear" }} />
+            </div>
+            <button onClick={handleCatch} style={{
+              padding: "12px 32px", background: `linear-gradient(135deg, ${activeCritter.color}, ${RARITY_COLORS[activeCritter.rarity]})`,
+              border: "none", borderRadius: "10px", color: "#fff", fontWeight: 900, fontSize: "15px",
+              cursor: "pointer", letterSpacing: "1px", boxShadow: `0 4px 20px ${activeCritter.color}66`,
+              transform: "scale(1)", transition: "transform 0.1s",
+            }}
+              onMouseDown={e => e.currentTarget.style.transform = "scale(0.95)"}
+              onMouseUp={e => e.currentTarget.style.transform = "scale(1)"}
+            >
+              !catch — FANGEN!
+            </button>
+          </>
+        ) : (
+          <div style={{ color: "#555" }}>
+            <div style={{ fontSize: "40px", marginBottom: "8px" }}>🌿</div>
+            <div style={{ fontSize: "13px" }}>Nächster Spawn in <span style={{ color: "#7B2FBE", fontWeight: 700 }}>{spawnTimer || "..."}s</span></div>
+            <div style={{ fontSize: "11px", marginTop: "4px", color: "#444" }}>Im Chat: !catch wenn ein Critter erscheint</div>
+          </div>
+        )}
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: "8px", width: "100%", maxWidth: "420px" }}>
+        {["live", "sammlung", "rangliste"].map(t2 => (
+          <button key={t2} onClick={() => setTab(t2)} style={{
+            flex: 1, padding: "8px", background: tab === t2 ? "rgba(123,47,190,0.4)" : "rgba(255,255,255,0.04)",
+            border: `1px solid ${tab === t2 ? "#7B2FBE" : "rgba(255,255,255,0.1)"}`,
+            borderRadius: "8px", color: tab === t2 ? "#e0e0ff" : "#666", fontWeight: 700, fontSize: "11px",
+            cursor: "pointer", letterSpacing: "1px", textTransform: "uppercase", transition: "all 0.2s"
+          }}>{t2 === "live" ? "💬 Chat" : t2 === "sammlung" ? "📦 Sammlung" : "🏆 Top"}</button>
+        ))}
+      </div>
+
+      {/* Tab Content */}
+      <div style={{ width: "100%", maxWidth: "420px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "14px", overflow: "hidden", minHeight: "220px" }}>
+        {tab === "live" && (
+          <div ref={chatRef} style={{ height: "260px", overflowY: "auto", padding: "12px", display: "flex", flexDirection: "column", gap: "4px" }}>
+            {chatLog.map(msg => (
+              <div key={msg.id} style={{ fontSize: "12px", lineHeight: 1.5, opacity: 0.9 }}>
+                <span style={{
+                  fontWeight: 700,
+                  color: msg.type === "system" ? "#7B2FBE" : msg.type === "success" ? "#95E1A3" : msg.type === "catch" ? "#FFD700" : "#00D4FF",
+                  marginRight: "6px"
+                }}>{msg.user}</span>
+                <span style={{ color: msg.type === "system" ? "#aaa" : "#ccc" }}>{msg.msg}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tab === "sammlung" && (
+          <div style={{ padding: "16px" }}>
+            <div style={{ fontSize: "11px", color: "#666", marginBottom: "12px", letterSpacing: "2px" }}>DEINE SAMMLUNG ({myCollection.length}/{CRITTERS.length})</div>
+            {myCollection.length === 0 ? (
+              <div style={{ textAlign: "center", color: "#444", padding: "30px 0" }}>
+                <div style={{ fontSize: "30px" }}>📭</div>
+                <div style={{ fontSize: "12px", marginTop: "8px" }}>Noch keine Critter gefangen!</div>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px" }}>
+                {myCollection.map(c => (
+                  <div key={c.id} style={{ textAlign: "center", background: "rgba(255,255,255,0.04)", borderRadius: "10px", padding: "10px 4px", border: `1px solid ${RARITY_COLORS[c.rarity]}44` }}>
+                    <div style={{ fontSize: "28px" }}>{c.emoji}</div>
+                    <div style={{ fontSize: "9px", color: "#aaa", marginTop: "2px" }}>{c.name}</div>
+                    <div style={{ fontSize: "10px", color: RARITY_COLORS[c.rarity], fontWeight: 700 }}>×{collection[c.id]}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === "rangliste" && (
+          <div style={{ padding: "16px" }}>
+            <div style={{ fontSize: "11px", color: "#666", marginBottom: "12px", letterSpacing: "2px" }}>TOP CATCHER</div>
+            {sortedLB.length === 0 ? (
+              <div style={{ textAlign: "center", color: "#444", padding: "30px 0", fontSize: "12px" }}>Noch keine Punkte!</div>
+            ) : sortedLB.map(([name, pts], i) => (
+              <div key={name} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 10px", marginBottom: "4px", background: name === yourName ? "rgba(123,47,190,0.2)" : "rgba(255,255,255,0.03)", borderRadius: "8px", border: name === yourName ? "1px solid #7B2FBE44" : "1px solid transparent" }}>
+                <div style={{ width: "20px", fontWeight: 900, color: i === 0 ? "#FFD700" : i === 1 ? "#C0C0C0" : i === 2 ? "#CD7F32" : "#555", fontSize: "12px" }}>#{i + 1}</div>
+                <div style={{ flex: 1, fontSize: "13px", fontWeight: name === yourName ? 700 : 400, color: name === yourName ? "#e0e0ff" : "#aaa" }}>{name}</div>
+                <div style={{ fontSize: "12px", color: "#FFD700", fontWeight: 700 }}>{pts} pts</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Footer hint */}
+      <div style={{ fontSize: "10px", color: "#333", letterSpacing: "2px", textAlign: "center" }}>
+        CHAT-BEFEHL: !catch • SELTENHEIT: COMMON › RARE › EPIC › LEGENDARY
+      </div>
+
+      <style>{`
+        @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+        @keyframes pulse { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1.1); } }
+        ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+      `}</style>
+    </div>
+  );
+}
